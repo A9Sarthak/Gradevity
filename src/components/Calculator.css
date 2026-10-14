@@ -758,6 +758,87 @@
   border: 1px solid var(--card-border);
 }
 
+.sub-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.quick-grade-stamp-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--bg-input);
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+}
+
+.stamp-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 2px;
+}
+
+.stamp-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: 'Outfit', sans-serif;
+  cursor: grab;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.stamp-chip:active {
+  cursor: grabbing;
+  transform: scale(1.15);
+}
+
+.stamp-chip.chip-s {
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--accent-hover);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+}
+
+.stamp-chip.chip-a {
+  background: rgba(16, 185, 129, 0.18);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.stamp-chip.chip-b {
+  background: rgba(14, 165, 233, 0.18);
+  color: #0ea5e9;
+  border: 1px solid rgba(14, 165, 233, 0.35);
+}
+
+.stamp-chip.chip-c {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.stamp-chip.chip-d {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--error);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.stamp-chip:hover {
+  transform: scale(1.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
 .compact-add-btn {
   display: inline-flex;
   align-items: center;
@@ -777,6 +858,146 @@
   background: var(--accent-color);
   color: #fff;
   border-color: var(--accent-color);
+}
+
+.compact-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.compact-clear-btn:hover {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.clear-all-btn {
+  color: var(--text-muted);
+  gap: 6px;
+}
+
+.clear-all-btn:hover {
+  color: var(--error) !important;
+  background: rgba(239, 68, 68, 0.12) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
+.compact-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-input-focus);
+  border: 1px solid var(--accent-color);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px -2px var(--accent-glow);
+  margin-bottom: 4px;
+}
+
+.full-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  border: 1px solid var(--accent-color);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px -4px var(--accent-glow);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  background: var(--bg-surface);
+}
+
+.batch-count-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--accent-color);
+  color: #fff;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.batch-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.batch-grade-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.batch-chip {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.batch-chip:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.batch-del-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--error);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.batch-del-btn:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+.batch-clear-btn {
+  padding: 3px 6px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.batch-clear-btn:hover {
+  color: var(--text-main);
+}
+
+.row-checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent-color);
+}
+
+.row-selected {
+  background: rgba(99, 102, 241, 0.08) !important;
 }
 
 .compact-table-wrap {

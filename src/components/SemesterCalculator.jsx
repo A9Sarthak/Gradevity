@@ -24,7 +24,10 @@ import {
   EyeOff,
   ChevronRight,
   Undo2,
-  RotateCcw
+  RotateCcw,
+  Paintbrush,
+  CheckSquare,
+  GripVertical
 } from 'lucide-react';
 import { scanImageForSubjects } from '../utils/ocrParser';
 import './Calculator.css';
@@ -139,6 +142,9 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
   // Per-semester Undo History Map: { [semId]: Array<{ theory: [...], lab: [...] }> }
   const [historyMap, setHistoryMap] = useState({});
   const lastEditTimeRef = useRef({});
+
+  // Multi-selection state for batch grade & delete actions: { [`${semId}_${type}`]: [subId1, ...] }
+  const [selectedSubsMap, setSelectedSubsMap] = useState({});
 
   const triggerToast = (msg) => {
     setFeedbackMsg(msg);
@@ -430,6 +436,123 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
     }));
 
     triggerToast(`Reset ${targetSem.name} to clean defaults (Undo available)`);
+  };
+
+  // Universal Clear & Batch Grade Management
+  const getSelectedFor = (semId, type) => {
+    return selectedSubsMap[`${semId}_${type}`] || [];
+  };
+
+  const toggleSelectSubject = (semId, type, subId) => {
+    const key = `${semId}_${type}`;
+    const current = selectedSubsMap[key] || [];
+    const next = current.includes(subId)
+      ? current.filter(id => id !== subId)
+      : [...current, subId];
+
+    setSelectedSubsMap(prev => ({
+      ...prev,
+      [key]: next
+    }));
+  };
+
+  const toggleSelectAll = (semId, type) => {
+    const sem = semesters.find(s => s.id === semId);
+    if (!sem) return;
+    const list = sem[type] || [];
+    const key = `${semId}_${type}`;
+    const current = selectedSubsMap[key] || [];
+
+    if (current.length === list.length && list.length > 0) {
+      setSelectedSubsMap(prev => ({ ...prev, [key]: [] }));
+    } else {
+      setSelectedSubsMap(prev => ({ ...prev, [key]: list.map(s => s.id) }));
+    }
+  };
+
+  const clearSelection = (semId, type) => {
+    const key = `${semId}_${type}`;
+    setSelectedSubsMap(prev => ({ ...prev, [key]: [] }));
+  };
+
+  const setBatchGrade = (semId, type, grade, targetIds = null) => {
+    const sem = semesters.find(s => s.id === semId);
+    if (!sem) return;
+    const list = sem[type] || [];
+    if (list.length === 0) return;
+
+    pushHistory(semId);
+
+    setSemesters(semesters.map(s => {
+      if (s.id === semId) {
+        return {
+          ...s,
+          [type]: (s[type] || []).map(sub => {
+            if (!targetIds || targetIds.includes(sub.id)) {
+              return { ...sub, grade };
+            }
+            return sub;
+          })
+        };
+      }
+      return s;
+    }));
+
+    const count = targetIds ? targetIds.length : list.length;
+    triggerToast(`Set ${count} ${type} courses to Grade ${grade}!`);
+  };
+
+  const deleteSelectedSubjects = (semId, type) => {
+    const key = `${semId}_${type}`;
+    const selectedIds = selectedSubsMap[key] || [];
+    if (selectedIds.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete ${selectedIds.length} selected ${type} courses? (You can use Undo to restore them)`
+    );
+    if (!confirmed) return;
+
+    pushHistory(semId);
+
+    setSemesters(semesters.map(s => {
+      if (s.id === semId) {
+        return {
+          ...s,
+          [type]: (s[type] || []).filter(sub => !selectedIds.includes(sub.id))
+        };
+      }
+      return s;
+    }));
+
+    clearSelection(semId, type);
+    triggerToast(`Deleted ${selectedIds.length} ${type} courses (Undo available)`);
+  };
+
+  const clearAllSubjects = (semId, type) => {
+    const sem = semesters.find(s => s.id === semId);
+    if (!sem) return;
+    const count = (sem[type] || []).length;
+    if (count === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete ALL ${count} ${type} courses in "${sem.name}"? (You can use Undo to restore them)`
+    );
+    if (!confirmed) return;
+
+    pushHistory(semId);
+
+    setSemesters(semesters.map(s => {
+      if (s.id === semId) {
+        return {
+          ...s,
+          [type]: []
+        };
+      }
+      return s;
+    }));
+
+    clearSelection(semId, type);
+    triggerToast(`Deleted all ${count} ${type} courses in ${sem.name} (Undo available)`);
   };
 
   // Subject Management within a semester
@@ -1044,166 +1167,389 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
                 {/* Compact Subjects Manager */}
                 <div className="card-subjects-body">
                   {/* Theory Section */}
-                  <div className="compact-sub-group">
-                    <div className="compact-sub-header">
-                      <div className="sub-header-left">
-                        <BookOpen size={14} className="text-accent" />
-                        <h4>Theory ({sem.theory?.length || 0})</h4>
-                        <span className="credits-sub-badge">{stats.theoryCredits} Cr</span>
-                      </div>
-                      <button 
-                        className="compact-add-btn"
-                        onClick={() => addSubject(sem.id, 'theory')}
-                      >
-                        <Plus size={13} /> Add
-                      </button>
-                    </div>
+                  {/* Theory Section */}
+                  {(() => {
+                    const selTheory = getSelectedFor(sem.id, 'theory');
+                    const theoryCount = sem.theory?.length || 0;
 
-                    <div className="compact-table-wrap">
-                      <table className="compact-sub-table">
-                        <thead>
-                          <tr>
-                            <th style={{ width: '45%' }}>Course Name</th>
-                            <th style={{ width: '22%' }}>Cr</th>
-                            <th style={{ width: '25%' }}>Grade</th>
-                            <th style={{ width: '8%' }}></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(sem.theory || []).map((sub, sIdx) => (
-                            <tr key={sub.id} className="compact-row">
-                              <td>
-                                <input 
-                                  type="text" 
-                                  className="compact-input-field name-field"
-                                  placeholder={`Theory ${sIdx + 1}`}
-                                  value={sub.name}
-                                  onChange={(e) => updateSubject(sem.id, 'theory', sub.id, 'name', e.target.value)}
-                                />
-                              </td>
-                              <td>
-                                <input 
-                                  type="number"
-                                  className="compact-input-field credit-field"
-                                  list="credits-options"
-                                  min="0"
-                                  step="0.5"
-                                  value={sub.credits}
-                                  onChange={(e) => updateSubject(sem.id, 'theory', sub.id, 'credits', e.target.value ? Number(e.target.value) : "")}
-                                />
-                              </td>
-                              <td>
-                                <select 
-                                  className="compact-input-field grade-field"
-                                  value={sub.grade}
-                                  onChange={(e) => updateSubject(sem.id, 'theory', sub.id, 'grade', e.target.value)}
-                                >
-                                  {Object.keys(GRADE_POINTS).map(g => (
-                                    <option key={g} value={g}>{g} ({GRADE_POINTS[g]})</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="action-cell">
+                    return (
+                      <div className="compact-sub-group">
+                        <div className="compact-sub-header">
+                          <div className="sub-header-left">
+                            <BookOpen size={14} className="text-accent" />
+                            <h4>Theory ({theoryCount})</h4>
+                            <span className="credits-sub-badge">{stats.theoryCredits} Cr</span>
+                          </div>
+
+                          <div className="sub-header-right">
+                            {/* Draggable & Clickable Quick Grade Stamper */}
+                            {theoryCount > 0 && (
+                              <div className="quick-grade-stamp-bar" title="Click to set all to this grade, or drag chip onto any course">
+                                <span className="stamp-label">Set All:</span>
+                                {['S', 'A', 'B', 'C'].map(g => (
+                                  <span 
+                                    key={g}
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.setData('text/plain', g);
+                                      e.dataTransfer.effectAllowed = 'copy';
+                                    }}
+                                    className={`stamp-chip chip-${g.toLowerCase()}`}
+                                    onClick={() => setBatchGrade(sem.id, 'theory', g)}
+                                    title={`Set all theory to ${g} (or drag to a course)`}
+                                  >
+                                    {g}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            <button 
+                              className="compact-add-btn"
+                              onClick={() => addSubject(sem.id, 'theory')}
+                              title="Add theory course"
+                            >
+                              <Plus size={13} /> Add
+                            </button>
+
+                            {theoryCount > 0 && (
+                              <button 
+                                className="compact-clear-btn"
+                                onClick={() => clearAllSubjects(sem.id, 'theory')}
+                                title="Universal delete: Delete all theory courses"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Floating / Inline Batch Bar if rows selected */}
+                        {selTheory.length > 0 && (
+                          <div className="compact-batch-bar animate-fade-in">
+                            <span className="batch-count-tag">{selTheory.length} Selected</span>
+                            <div className="batch-grade-chips">
+                              {['S', 'A', 'B', 'C', 'D'].map(g => (
                                 <button 
-                                  className="compact-del-btn" 
-                                  onClick={() => removeSubject(sem.id, 'theory', sub.id)}
-                                  title="Remove subject"
+                                  key={g}
+                                  className={`batch-chip chip-${g.toLowerCase()}`}
+                                  onClick={() => setBatchGrade(sem.id, 'theory', g, selTheory)}
+                                  title={`Set selected to ${g}`}
                                 >
-                                  <Trash2 size={14} />
+                                  {g}
                                 </button>
-                              </td>
-                            </tr>
-                          ))}
-                          {(sem.theory || []).length === 0 && (
-                            <tr>
-                              <td colSpan="4" className="empty-compact-state">No theory subjects added.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                              ))}
+                            </div>
+                            <button 
+                              className="batch-del-btn"
+                              onClick={() => deleteSelectedSubjects(sem.id, 'theory')}
+                              title="Delete selected courses"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                            <button 
+                              className="batch-clear-btn"
+                              onClick={() => clearSelection(sem.id, 'theory')}
+                              title="Deselect all"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="compact-table-wrap">
+                          <table className="compact-sub-table">
+                            <thead>
+                              <tr>
+                                <th style={{ width: '28px', textAlign: 'center' }}>
+                                  <input 
+                                    type="checkbox"
+                                    className="row-checkbox"
+                                    checked={selTheory.length === theoryCount && theoryCount > 0}
+                                    onChange={() => toggleSelectAll(sem.id, 'theory')}
+                                    title="Select all theory"
+                                  />
+                                </th>
+                                <th style={{ width: '42%' }}>Course Name</th>
+                                <th style={{ width: '20%' }}>Cr</th>
+                                <th style={{ width: '24%' }}>Grade</th>
+                                <th style={{ width: '28px' }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(sem.theory || []).map((sub, sIdx) => {
+                                const isSelected = selTheory.includes(sub.id);
+                                return (
+                                  <tr 
+                                    key={sub.id} 
+                                    className={`compact-row ${isSelected ? 'row-selected' : ''}`}
+                                    onDragOver={(e) => {
+                                      e.preventDefault();
+                                      e.dataTransfer.dropEffect = 'copy';
+                                    }}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      const droppedGrade = e.dataTransfer.getData('text/plain');
+                                      if (droppedGrade && Object.keys(GRADE_POINTS).includes(droppedGrade)) {
+                                        updateSubject(sem.id, 'theory', sub.id, 'grade', droppedGrade);
+                                        triggerToast(`Set ${sub.name || `Theory ${sIdx + 1}`} to Grade ${droppedGrade}`);
+                                      }
+                                    }}
+                                  >
+                                    <td style={{ textAlign: 'center' }}>
+                                      <input 
+                                        type="checkbox"
+                                        className="row-checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleSelectSubject(sem.id, 'theory', sub.id)}
+                                      />
+                                    </td>
+                                    <td>
+                                      <input 
+                                        type="text" 
+                                        className="compact-input-field name-field"
+                                        placeholder={`Theory ${sIdx + 1}`}
+                                        value={sub.name}
+                                        onChange={(e) => updateSubject(sem.id, 'theory', sub.id, 'name', e.target.value)}
+                                      />
+                                    </td>
+                                    <td>
+                                      <input 
+                                        type="number"
+                                        className="compact-input-field credit-field"
+                                        list="credits-options"
+                                        min="0"
+                                        step="0.5"
+                                        value={sub.credits}
+                                        onChange={(e) => updateSubject(sem.id, 'theory', sub.id, 'credits', e.target.value ? Number(e.target.value) : "")}
+                                      />
+                                    </td>
+                                    <td>
+                                      <select 
+                                        className="compact-input-field grade-field"
+                                        value={sub.grade}
+                                        onChange={(e) => updateSubject(sem.id, 'theory', sub.id, 'grade', e.target.value)}
+                                      >
+                                        {Object.keys(GRADE_POINTS).map(g => (
+                                          <option key={g} value={g}>{g} ({GRADE_POINTS[g]})</option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                    <td className="action-cell">
+                                      <button 
+                                        className="compact-del-btn" 
+                                        onClick={() => removeSubject(sem.id, 'theory', sub.id)}
+                                        title="Remove subject"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {theoryCount === 0 && (
+                                <tr>
+                                  <td colSpan="5" className="empty-compact-state">No theory subjects added.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Lab Section */}
-                  <div className="compact-sub-group">
-                    <div className="compact-sub-header">
-                      <div className="sub-header-left">
-                        <FlaskConical size={14} className="text-accent" />
-                        <h4>Lab ({sem.lab?.length || 0})</h4>
-                        <span className="credits-sub-badge">{stats.labCredits} Cr</span>
-                      </div>
-                      <button 
-                        className="compact-add-btn"
-                        onClick={() => addSubject(sem.id, 'lab')}
-                      >
-                        <Plus size={13} /> Add
-                      </button>
-                    </div>
+                  {(() => {
+                    const selLab = getSelectedFor(sem.id, 'lab');
+                    const labCount = sem.lab?.length || 0;
 
-                    <div className="compact-table-wrap">
-                      <table className="compact-sub-table">
-                        <thead>
-                          <tr>
-                            <th style={{ width: '45%' }}>Course Name</th>
-                            <th style={{ width: '22%' }}>Cr</th>
-                            <th style={{ width: '25%' }}>Grade</th>
-                            <th style={{ width: '8%' }}></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(sem.lab || []).map((sub, sIdx) => (
-                            <tr key={sub.id} className="compact-row">
-                              <td>
-                                <input 
-                                  type="text" 
-                                  className="compact-input-field name-field"
-                                  placeholder={`Lab ${sIdx + 1}`}
-                                  value={sub.name}
-                                  onChange={(e) => updateSubject(sem.id, 'lab', sub.id, 'name', e.target.value)}
-                                />
-                              </td>
-                              <td>
-                                <input 
-                                  type="number"
-                                  className="compact-input-field credit-field"
-                                  list="credits-options"
-                                  min="0"
-                                  step="0.5"
-                                  value={sub.credits}
-                                  onChange={(e) => updateSubject(sem.id, 'lab', sub.id, 'credits', e.target.value ? Number(e.target.value) : "")}
-                                />
-                              </td>
-                              <td>
-                                <select 
-                                  className="compact-input-field grade-field"
-                                  value={sub.grade}
-                                  onChange={(e) => updateSubject(sem.id, 'lab', sub.id, 'grade', e.target.value)}
-                                >
-                                  {Object.keys(GRADE_POINTS).map(g => (
-                                    <option key={g} value={g}>{g} ({GRADE_POINTS[g]})</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="action-cell">
+                    return (
+                      <div className="compact-sub-group">
+                        <div className="compact-sub-header">
+                          <div className="sub-header-left">
+                            <FlaskConical size={14} className="text-accent" />
+                            <h4>Lab ({labCount})</h4>
+                            <span className="credits-sub-badge">{stats.labCredits} Cr</span>
+                          </div>
+
+                          <div className="sub-header-right">
+                            {/* Draggable & Clickable Quick Grade Stamper */}
+                            {labCount > 0 && (
+                              <div className="quick-grade-stamp-bar" title="Click to set all to this grade, or drag chip onto any course">
+                                <span className="stamp-label">Set All:</span>
+                                {['S', 'A', 'B', 'C'].map(g => (
+                                  <span 
+                                    key={g}
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.setData('text/plain', g);
+                                      e.dataTransfer.effectAllowed = 'copy';
+                                    }}
+                                    className={`stamp-chip chip-${g.toLowerCase()}`}
+                                    onClick={() => setBatchGrade(sem.id, 'lab', g)}
+                                    title={`Set all labs to ${g} (or drag to a course)`}
+                                  >
+                                    {g}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            <button 
+                              className="compact-add-btn"
+                              onClick={() => addSubject(sem.id, 'lab')}
+                              title="Add lab course"
+                            >
+                              <Plus size={13} /> Add
+                            </button>
+
+                            {labCount > 0 && (
+                              <button 
+                                className="compact-clear-btn"
+                                onClick={() => clearAllSubjects(sem.id, 'lab')}
+                                title="Universal delete: Delete all lab courses"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Floating / Inline Batch Bar if rows selected */}
+                        {selLab.length > 0 && (
+                          <div className="compact-batch-bar animate-fade-in">
+                            <span className="batch-count-tag">{selLab.length} Selected</span>
+                            <div className="batch-grade-chips">
+                              {['S', 'A', 'B', 'C', 'D'].map(g => (
                                 <button 
-                                  className="compact-del-btn" 
-                                  onClick={() => removeSubject(sem.id, 'lab', sub.id)}
-                                  title="Remove subject"
+                                  key={g}
+                                  className={`batch-chip chip-${g.toLowerCase()}`}
+                                  onClick={() => setBatchGrade(sem.id, 'lab', g, selLab)}
+                                  title={`Set selected to ${g}`}
                                 >
-                                  <Trash2 size={14} />
+                                  {g}
                                 </button>
-                              </td>
-                            </tr>
-                          ))}
-                          {(sem.lab || []).length === 0 && (
-                            <tr>
-                              <td colSpan="4" className="empty-compact-state">No lab subjects added.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                              ))}
+                            </div>
+                            <button 
+                              className="batch-del-btn"
+                              onClick={() => deleteSelectedSubjects(sem.id, 'lab')}
+                              title="Delete selected courses"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                            <button 
+                              className="batch-clear-btn"
+                              onClick={() => clearSelection(sem.id, 'lab')}
+                              title="Deselect all"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="compact-table-wrap">
+                          <table className="compact-sub-table">
+                            <thead>
+                              <tr>
+                                <th style={{ width: '28px', textAlign: 'center' }}>
+                                  <input 
+                                    type="checkbox"
+                                    className="row-checkbox"
+                                    checked={selLab.length === labCount && labCount > 0}
+                                    onChange={() => toggleSelectAll(sem.id, 'lab')}
+                                    title="Select all labs"
+                                  />
+                                </th>
+                                <th style={{ width: '42%' }}>Course Name</th>
+                                <th style={{ width: '20%' }}>Cr</th>
+                                <th style={{ width: '24%' }}>Grade</th>
+                                <th style={{ width: '28px' }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(sem.lab || []).map((sub, sIdx) => {
+                                const isSelected = selLab.includes(sub.id);
+                                return (
+                                  <tr 
+                                    key={sub.id} 
+                                    className={`compact-row ${isSelected ? 'row-selected' : ''}`}
+                                    onDragOver={(e) => {
+                                      e.preventDefault();
+                                      e.dataTransfer.dropEffect = 'copy';
+                                    }}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      const droppedGrade = e.dataTransfer.getData('text/plain');
+                                      if (droppedGrade && Object.keys(GRADE_POINTS).includes(droppedGrade)) {
+                                        updateSubject(sem.id, 'lab', sub.id, 'grade', droppedGrade);
+                                        triggerToast(`Set ${sub.name || `Lab ${sIdx + 1}`} to Grade ${droppedGrade}`);
+                                      }
+                                    }}
+                                  >
+                                    <td style={{ textAlign: 'center' }}>
+                                      <input 
+                                        type="checkbox"
+                                        className="row-checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleSelectSubject(sem.id, 'lab', sub.id)}
+                                      />
+                                    </td>
+                                    <td>
+                                      <input 
+                                        type="text" 
+                                        className="compact-input-field name-field"
+                                        placeholder={`Lab ${sIdx + 1}`}
+                                        value={sub.name}
+                                        onChange={(e) => updateSubject(sem.id, 'lab', sub.id, 'name', e.target.value)}
+                                      />
+                                    </td>
+                                    <td>
+                                      <input 
+                                        type="number"
+                                        className="compact-input-field credit-field"
+                                        list="credits-options"
+                                        min="0"
+                                        step="0.5"
+                                        value={sub.credits}
+                                        onChange={(e) => updateSubject(sem.id, 'lab', sub.id, 'credits', e.target.value ? Number(e.target.value) : "")}
+                                      />
+                                    </td>
+                                    <td>
+                                      <select 
+                                        className="compact-input-field grade-field"
+                                        value={sub.grade}
+                                        onChange={(e) => updateSubject(sem.id, 'lab', sub.id, 'grade', e.target.value)}
+                                      >
+                                        {Object.keys(GRADE_POINTS).map(g => (
+                                          <option key={g} value={g}>{g} ({GRADE_POINTS[g]})</option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                    <td className="action-cell">
+                                      <button 
+                                        className="compact-del-btn" 
+                                        onClick={() => removeSubject(sem.id, 'lab', sub.id)}
+                                        title="Remove subject"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {labCount === 0 && (
+                                <tr>
+                                  <td colSpan="5" className="empty-compact-state">No lab subjects added.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Card Footer Actions */}
@@ -1256,6 +1602,7 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
   function renderFullSubjectTable(sem, type) {
     const subjects = sem[type] || [];
     const isTheory = type === 'theory';
+    const selSubs = getSelectedFor(sem.id, type);
 
     return (
       <div className="subject-section glass-panel animate-fade-in" key={type}>
@@ -1264,15 +1611,93 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
             {isTheory ? <BookOpen size={20} className="text-accent" /> : <FlaskConical size={20} className="text-accent" />}
             <h2>{isTheory ? 'Theory Subjects' : 'Lab Subjects'} ({subjects.length})</h2>
           </div>
-          <button className="btn-secondary add-btn" onClick={() => addSubject(sem.id, type)}>
-            <Plus size={16} /> Add Subject
-          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            {/* Draggable & Clickable Quick Grade Stamper */}
+            {subjects.length > 0 && (
+              <div className="quick-grade-stamp-bar full-view-stamp" title="Click to set all to this grade, or drag onto any course">
+                <span className="stamp-label">Set All:</span>
+                {['S', 'A', 'B', 'C', 'D'].map(g => (
+                  <span
+                    key={g}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', g);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    className={`stamp-chip chip-${g.toLowerCase()}`}
+                    onClick={() => setBatchGrade(sem.id, type, g)}
+                    title={`Click to set all to ${g}, or drag onto a course`}
+                  >
+                    {g}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <button className="btn-secondary add-btn" onClick={() => addSubject(sem.id, type)}>
+              <Plus size={16} /> Add Subject
+            </button>
+
+            {subjects.length > 0 && (
+              <button 
+                className="btn-secondary clear-all-btn" 
+                onClick={() => clearAllSubjects(sem.id, type)}
+                title={`Universal delete: Delete all ${isTheory ? 'theory' : 'lab'} courses`}
+              >
+                <Trash2 size={15} /> Clear All
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Floating Batch Action Bar when rows are selected */}
+        {selSubs.length > 0 && (
+          <div className="full-batch-bar glass-panel animate-fade-in">
+            <span className="batch-count-tag">{selSubs.length} Selected</span>
+            <span className="batch-label">Set Grade:</span>
+            <div className="batch-grade-chips">
+              {Object.keys(GRADE_POINTS).map(g => (
+                <button 
+                  key={g}
+                  className={`batch-chip chip-${g.toLowerCase()}`}
+                  onClick={() => setBatchGrade(sem.id, type, g, selSubs)}
+                  title={`Set selected to ${g}`}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+            <button 
+              className="btn-secondary batch-del-btn"
+              onClick={() => deleteSelectedSubjects(sem.id, type)}
+              title="Delete selected courses"
+            >
+              <Trash2 size={14} /> Delete Selected
+            </button>
+            <button 
+              className="btn-secondary batch-clear-btn"
+              onClick={() => clearSelection(sem.id, type)}
+              title="Clear selection"
+            >
+              ✕ Clear
+            </button>
+          </div>
+        )}
         
         <div className="table-responsive">
           <table className="subjects-table">
             <thead>
               <tr>
+                <th style={{ width: '40px', textAlign: 'center' }}>
+                  <input 
+                    type="checkbox"
+                    className="row-checkbox"
+                    checked={selSubs.length === subjects.length && subjects.length > 0}
+                    onChange={() => toggleSelectAll(sem.id, type)}
+                    title="Select all"
+                  />
+                </th>
                 <th>Subject Name (Optional)</th>
                 <th>Credits</th>
                 <th>Grade</th>
@@ -1280,51 +1705,77 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
               </tr>
             </thead>
             <tbody>
-              {subjects.map((sub, index) => (
-                <tr key={sub.id} className="animate-fade-in">
-                  <td>
-                    <input 
-                      type="text" 
-                      className="input-field" 
-                      placeholder={`${isTheory ? 'Theory' : 'Lab'} Sub ${index + 1}`}
-                      value={sub.name}
-                      onChange={(e) => updateSubject(sem.id, type, sub.id, 'name', e.target.value)}
-                    />
-                  </td>
-                  <td>
-                    <input 
-                      type="number"
-                      className="input-field" 
-                      list="credits-options"
-                      min="0"
-                      step="0.5"
-                      value={sub.credits}
-                      onChange={(e) => updateSubject(sem.id, type, sub.id, 'credits', e.target.value ? Number(e.target.value) : "")}
-                      placeholder="Credits"
-                      style={{ padding: '8px' }}
-                    />
-                  </td>
-                  <td style={{ minWidth: '150px' }}>
-                    <select 
-                      className="input-field" 
-                      value={sub.grade}
-                      onChange={(e) => updateSubject(sem.id, type, sub.id, 'grade', e.target.value)}
-                    >
-                      {Object.keys(GRADE_POINTS).map(g => (
-                        <option key={g} value={g}>{g} ({GRADE_POINTS[g]})</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <button className="delete-btn" onClick={() => removeSubject(sem.id, type, sub.id)}>
-                      <Trash2 size={18} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {subjects.map((sub, index) => {
+                const isSelected = selSubs.includes(sub.id);
+                return (
+                  <tr 
+                    key={sub.id} 
+                    className={`animate-fade-in ${isSelected ? 'row-selected' : ''}`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'copy';
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const droppedGrade = e.dataTransfer.getData('text/plain');
+                      if (droppedGrade && Object.keys(GRADE_POINTS).includes(droppedGrade)) {
+                        updateSubject(sem.id, type, sub.id, 'grade', droppedGrade);
+                        triggerToast(`Set ${sub.name || `${isTheory ? 'Theory' : 'Lab'} ${index + 1}`} to Grade ${droppedGrade}`);
+                      }
+                    }}
+                  >
+                    <td style={{ textAlign: 'center' }}>
+                      <input 
+                        type="checkbox"
+                        className="row-checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectSubject(sem.id, type, sub.id)}
+                      />
+                    </td>
+                    <td>
+                      <input 
+                        type="text" 
+                        className="input-field" 
+                        placeholder={`${isTheory ? 'Theory' : 'Lab'} Sub ${index + 1}`}
+                        value={sub.name}
+                        onChange={(e) => updateSubject(sem.id, type, sub.id, 'name', e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input 
+                        type="number"
+                        className="input-field" 
+                        list="credits-options"
+                        min="0"
+                        step="0.5"
+                        value={sub.credits}
+                        onChange={(e) => updateSubject(sem.id, type, sub.id, 'credits', e.target.value ? Number(e.target.value) : "")}
+                        placeholder="Credits"
+                        style={{ padding: '8px' }}
+                      />
+                    </td>
+                    <td style={{ minWidth: '150px' }}>
+                      <select 
+                        className="input-field" 
+                        value={sub.grade}
+                        onChange={(e) => updateSubject(sem.id, type, sub.id, 'grade', e.target.value)}
+                      >
+                        {Object.keys(GRADE_POINTS).map(g => (
+                          <option key={g} value={g}>{g} ({GRADE_POINTS[g]})</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button className="delete-btn" onClick={() => removeSubject(sem.id, type, sub.id)} title="Delete subject">
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {subjects.length === 0 && (
                 <tr>
-                  <td colSpan="4" className="empty-state">No {isTheory ? 'theory' : 'lab'} subjects added.</td>
+                  <td colSpan="5" className="empty-state">No {isTheory ? 'theory' : 'lab'} subjects added.</td>
                 </tr>
               )}
             </tbody>
