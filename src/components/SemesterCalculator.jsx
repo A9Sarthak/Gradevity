@@ -22,7 +22,9 @@ import {
   Layers, 
   Eye, 
   EyeOff,
-  ChevronRight
+  ChevronRight,
+  Undo2,
+  RotateCcw
 } from 'lucide-react';
 import { scanImageForSubjects } from '../utils/ocrParser';
 import './Calculator.css';
@@ -133,6 +135,10 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
 
   // Quick feedback toast / message
   const [feedbackMsg, setFeedbackMsg] = useState('');
+
+  // Per-semester Undo History Map: { [semId]: Array<{ theory: [...], lab: [...] }> }
+  const [historyMap, setHistoryMap] = useState({});
+  const lastEditTimeRef = useRef({});
 
   const triggerToast = (msg) => {
     setFeedbackMsg(msg);
@@ -336,8 +342,100 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
     setEditingTitleId(null);
   };
 
+  // Helper to push history snapshot for a semester
+  const pushHistory = (semId) => {
+    const currentSem = semesters.find(s => s.id === semId);
+    if (!currentSem) return;
+
+    const snapshot = {
+      theory: JSON.parse(JSON.stringify(currentSem.theory || [])),
+      lab: JSON.parse(JSON.stringify(currentSem.lab || []))
+    };
+
+    setHistoryMap(prev => {
+      const list = prev[semId] || [];
+      return {
+        ...prev,
+        [semId]: [...list.slice(-24), snapshot]
+      };
+    });
+  };
+
+  const pushHistoryDebounced = (semId, fieldKey) => {
+    const now = Date.now();
+    const key = `${semId}_${fieldKey}`;
+    const lastTime = lastEditTimeRef.current[key] || 0;
+    if (now - lastTime > 800) {
+      pushHistory(semId);
+    }
+    lastEditTimeRef.current[key] = now;
+  };
+
+  const canUndo = (semId) => {
+    return Boolean(historyMap[semId] && historyMap[semId].length > 0);
+  };
+
+  const getUndoCount = (semId) => {
+    return historyMap[semId]?.length || 0;
+  };
+
+  const handleUndo = (semId) => {
+    const list = historyMap[semId] || [];
+    if (list.length === 0) return;
+
+    const previousState = list[list.length - 1];
+    const updatedHistory = list.slice(0, -1);
+
+    setHistoryMap(prev => ({
+      ...prev,
+      [semId]: updatedHistory
+    }));
+
+    setSemesters(semesters.map(s => {
+      if (s.id === semId) {
+        return {
+          ...s,
+          theory: previousState.theory,
+          lab: previousState.lab
+        };
+      }
+      return s;
+    }));
+
+    const sem = semesters.find(s => s.id === semId);
+    triggerToast(`Undid last edit in ${sem?.name || 'semester'}`);
+  };
+
+  const handleResetSemester = (semId) => {
+    const targetSem = semesters.find(s => s.id === semId);
+    if (!targetSem) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to reset all courses in "${targetSem.name}"? (You can use Undo to restore them)`
+    );
+    if (!confirmed) return;
+
+    // Save snapshot so reset is 100% reversible via Undo!
+    pushHistory(semId);
+
+    setSemesters(semesters.map(s => {
+      if (s.id === semId) {
+        return {
+          ...s,
+          theory: createDefaultTheory(),
+          lab: createDefaultLab()
+        };
+      }
+      return s;
+    }));
+
+    triggerToast(`Reset ${targetSem.name} to clean defaults (Undo available)`);
+  };
+
   // Subject Management within a semester
   const addSubject = (semId, type) => {
+    pushHistory(semId);
+
     const defaultSub = { 
       id: crypto.randomUUID(), 
       name: '', 
@@ -357,6 +455,8 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
   };
 
   const removeSubject = (semId, type, subjectId) => {
+    pushHistory(semId);
+
     setSemesters(semesters.map(sem => {
       if (sem.id === semId) {
         return {
@@ -369,6 +469,12 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
   };
 
   const updateSubject = (semId, type, subjectId, field, value) => {
+    if (field === 'grade' || field === 'credits') {
+      pushHistory(semId);
+    } else if (field === 'name') {
+      pushHistoryDebounced(semId, `${subjectId}_name`);
+    }
+
     setSemesters(semesters.map(sem => {
       if (sem.id === semId) {
         const list = sem[type] || [];
@@ -420,6 +526,8 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
       }
 
       if (allExtractedSubjects.length > 0 && destSem) {
+        pushHistory(destSemId);
+
         let currentTheory = destSem.theory.length === 5 && destSem.theory[0].name === '' ? [] : [...destSem.theory];
         let currentLabs = destSem.lab.length === 3 && destSem.lab[0].name === '' ? [] : [...destSem.lab];
 
@@ -740,6 +848,23 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
                 <Copy size={16} />
               </button>
 
+              <button 
+                className={`btn-secondary icon-btn-round undo-action-btn ${canUndo(activeSemId) ? '' : 'disabled'}`}
+                onClick={() => handleUndo(activeSemId)}
+                disabled={!canUndo(activeSemId)}
+                title={canUndo(activeSemId) ? `Undo last edit in ${activeSem?.name || 'semester'} (${getUndoCount(activeSemId)} available)` : "No actions to undo"}
+              >
+                <Undo2 size={16} />
+              </button>
+
+              <button 
+                className="btn-secondary icon-btn-round reset-sem-btn"
+                onClick={() => handleResetSemester(activeSemId)}
+                title={`Reset ${activeSem?.name || 'semester'} to clean defaults`}
+              >
+                <RotateCcw size={16} />
+              </button>
+
               {semesters.length > 1 && (
                 <button 
                   className="btn-secondary icon-btn-round delete-sem-btn"
@@ -836,6 +961,23 @@ export default function SemesterCalculator({ initialData, overallData, onChange,
                       title="Duplicate this semester"
                     >
                       <Copy size={14} />
+                    </button>
+
+                    <button 
+                      className={`toolbar-btn undo-card-btn ${canUndo(sem.id) ? '' : 'disabled'}`}
+                      onClick={() => handleUndo(sem.id)}
+                      disabled={!canUndo(sem.id)}
+                      title={canUndo(sem.id) ? `Undo last edit in ${sem.name} (${getUndoCount(sem.id)} available)` : "No actions to undo"}
+                    >
+                      <Undo2 size={14} />
+                    </button>
+
+                    <button 
+                      className="toolbar-btn reset-card-btn"
+                      onClick={() => handleResetSemester(sem.id)}
+                      title={`Reset ${sem.name} to clean defaults`}
+                    >
+                      <RotateCcw size={14} />
                     </button>
 
                     {/* Screenshot OCR per semester */}

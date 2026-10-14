@@ -545,6 +545,43 @@
   opacity: 0.5;
 }
 
+.toolbar-btn.disabled,
+.toolbar-btn:disabled {
+  opacity: 0.28 !important;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+
+.toolbar-btn.undo-card-btn:not(:disabled):hover {
+  color: var(--accent-hover);
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.toolbar-btn.reset-card-btn:hover {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.undo-action-btn:not(:disabled):hover {
+  color: var(--accent-hover);
+  border-color: var(--accent-color);
+}
+
+.undo-action-btn.disabled,
+.undo-action-btn:disabled {
+  opacity: 0.3 !important;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+
+.reset-sem-btn:hover {
+  color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.1) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+}
+
 .upload-toolbar-btn {
   cursor: pointer;
 }
