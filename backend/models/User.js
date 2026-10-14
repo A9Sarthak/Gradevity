@@ -17,7 +17,7 @@ const UserSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: null
   }
-}, { timestamps: true });
+}, { timestamps: true, minimize: false });
 
 // Hash password before saving if modified
 UserSchema.pre('save', async function() {

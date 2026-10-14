@@ -50,15 +50,16 @@ export default function Dashboard() {
     setTimeout(() => setSaveStatus(''), 2000);
   };
 
-  const handleAddToCGPA = (credits, gpa) => {
+  const handleAddToCGPA = (credits, gpa, name) => {
     if (!credits || credits <= 0) return;
     
     const currentSems = overallData?.semesters || (userData?.overall?.semesters || []);
     const newSem = {
       id: crypto.randomUUID(),
-      name: `Added Sem ${currentSems.length + 1}`,
+      name: name || `Added Sem ${currentSems.length + 1}`,
       credits: credits,
-      gpa: gpa
+      gpa: gpa,
+      isIncluded: true
     };
     
     setOverallData({
@@ -67,6 +68,30 @@ export default function Dashboard() {
     });
     
     // Switch to the overall tab to show the newly added semester!
+    setActiveTab('overall');
+  };
+
+  const handleBatchAddToCGPA = (semsToAdd) => {
+    if (!Array.isArray(semsToAdd) || semsToAdd.length === 0) return;
+
+    const currentSems = overallData?.semesters || (userData?.overall?.semesters || []);
+    const validSems = semsToAdd
+      .filter(s => s && s.credits > 0 && Number(s.gpa) >= 0)
+      .map((s, idx) => ({
+        id: crypto.randomUUID(),
+        name: s.name || `Added Sem ${currentSems.length + idx + 1}`,
+        credits: Number(s.credits),
+        gpa: Number(s.gpa),
+        isIncluded: true
+      }));
+
+    if (validSems.length === 0) return;
+
+    setOverallData({
+      ...overallData,
+      semesters: [...currentSems, ...validSems]
+    });
+
     setActiveTab('overall');
   };
 
@@ -114,6 +139,7 @@ export default function Dashboard() {
               overallData={overallData || userData?.overall}
               onChange={setSemesterData} 
               onAddToCGPA={handleAddToCGPA}
+              onBatchAddToCGPA={handleBatchAddToCGPA}
             />
           )}
           {activeTab === 'overall' && (

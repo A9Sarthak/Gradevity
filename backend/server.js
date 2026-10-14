@@ -8,27 +8,78 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+// Enable CORS for all domains
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json({ limit: '10mb' }));
 
 // ------------------------------
-// MongoDB Connection
+// MongoDB Connection & Serverless Caching
 // ------------------------------
-const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/gpa_calculator';
+let cachedDbPromise = null;
 
-console.log('Connecting to MongoDB...');
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ Connected to MongoDB Backend!'))
-  .catch(err => console.error('❌ MongoDB Connection Error:', err));
+const ensureDbConnected = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
 
+  if (!cachedDbPromise) {
+    console.log('Connecting to MongoDB...');
+    cachedDbPromise = mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 8000,
+    }).then(m => {
+      console.log('✅ Connected to MongoDB Backend!');
+      return m;
+    }).catch(err => {
+      cachedDbPromise = null;
+      console.error('❌ MongoDB Connection Error:', err.message);
+      throw err;
+    });
+  }
+
+  return cachedDbPromise;
+};
+
+// Immediate connection attempt on startup
+ensureDbConnected().catch(() => {});
+
+// Middleware to ensure DB connection is ready for incoming requests
+app.use(async (req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  try {
+    await ensureDbConnected();
+    next();
+  } catch (err) {
+    return res.status(503).json({
+      error: 'Database connection failed. Please verify MONGODB_URI is configured properly.',
+      details: err.message
+    });
+  }
+});
 
 // ------------------------------
-// Routes
+// API Routes (Mounted on both /api and / for full Vercel compatibility)
 // ------------------------------
+const apiRouter = express.Router();
+
+// Health Check Endpoint
+apiRouter.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    dbState: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Screenshot Scanner Route (Gemini OCR)
-app.post('/api/scan-screenshot', async (req, res) => {
+apiRouter.post('/scan-screenshot', async (req, res) => {
   try {
     const { imageBase64, mimeType } = req.body;
     console.log('📸 Scan request received. Image size:', imageBase64 ? imageBase64.length : 0, 'bytes');
@@ -72,31 +123,33 @@ Respond ONLY with a JSON array of objects. Like this:
 });
 
 // Signup Route
-app.post('/api/auth/signup', async (req, res) => {
+apiRouter.post('/auth/signup', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required.' });
 
   try {
-    const existingUser = await User.findOne({ username: username.toLowerCase() });
+    const normalizedUsername = username.trim().toLowerCase();
+    const existingUser = await User.findOne({ username: normalizedUsername });
     if (existingUser) return res.status(400).json({ error: 'Username already taken.' });
 
-    const newUser = new User({ username, password });
+    const newUser = new User({ username: normalizedUsername, password });
     await newUser.save();
     
     res.json({ success: true, message: 'Account created successfully.', gpaData: newUser.gpaData });
   } catch (err) {
-    console.error(err);
+    console.error('Signup error:', err);
     res.status(500).json({ error: 'Server error during signup.' });
   }
 });
 
 // Login Route
-app.post('/api/auth/login', async (req, res) => {
+apiRouter.post('/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required.' });
 
   try {
-    const user = await User.findOne({ username: username.toLowerCase() });
+    const normalizedUsername = username.trim().toLowerCase();
+    const user = await User.findOne({ username: normalizedUsername });
     if (!user) return res.status(404).json({ error: 'User not found. Please sign up.' });
 
     const isMatch = await user.comparePassword(password);
@@ -104,45 +157,53 @@ app.post('/api/auth/login', async (req, res) => {
 
     res.json({ success: true, message: 'Logged in successfully.', gpaData: user.gpaData });
   } catch (err) {
-    console.error(err);
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error during login.' });
   }
 });
 
 // Load User Data Route
-app.get('/api/data/load/:username', async (req, res) => {
+apiRouter.get('/data/load/:username', async (req, res) => {
   try {
-    const user = await User.findOne({ username: req.params.username.toLowerCase() });
+    const normalizedUsername = (req.params.username || '').trim().toLowerCase();
+    if (!normalizedUsername) return res.status(400).json({ error: 'Username required.' });
+
+    const user = await User.findOne({ username: normalizedUsername });
     if (!user) return res.status(404).json({ error: 'User not found.' });
 
-    res.json({ success: true, data: user.gpaData });
+    res.json({ success: true, data: user.gpaData || null });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to load data.' });
+    console.error('Load data error:', err);
+    res.status(500).json({ error: 'Failed to load data: ' + err.message });
   }
 });
 
-// Save User Data Route
-app.post('/api/data/save', async (req, res) => {
+// Save User Data Route (Saves multi-semester & overall GPA data)
+apiRouter.post('/data/save', async (req, res) => {
   const { username, data } = req.body;
   if (!username || !data) return res.status(400).json({ error: 'Username and data are required.' });
 
   try {
+    const normalizedUsername = username.trim().toLowerCase();
     const user = await User.findOneAndUpdate(
-      { username: username.toLowerCase() },
+      { username: normalizedUsername },
       { $set: { gpaData: data } },
-      { new: true }
+      { new: true, runValidators: false }
     );
     
     if (!user) return res.status(404).json({ error: 'User not found.' });
     res.json({ success: true, message: 'Data saved successfully.', data: user.gpaData });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to save data.' });
+    console.error('Save data error:', err);
+    res.status(500).json({ error: 'Failed to save data: ' + err.message });
   }
 });
 
-// Start Server (only if not on Vercel)
+// Mount router on both /api and / so all Vercel/proxy combinations succeed
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
+
+// Start Server locally (not when invoked serverless by Vercel)
 if (!process.env.VERCEL) {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
